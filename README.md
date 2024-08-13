@@ -99,7 +99,7 @@ if __name__ == "__main__":
 
 **Note: The above image is not in BMP format. GitHub does not allow to upload BMP files to Markdown files. Hence, downloading the image and trying to run it in Python interpreter won't work.**
 
-#### Running code
+#### Running the image
 
 ```bash
 $ python code_fibonacci.bmp
