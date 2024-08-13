@@ -90,6 +90,7 @@ def generate_bmp_from_image_data_and_source_code(rgb_image: npt.NDArray[np.uint8
     total_used_colors = np.unique(rgb_image, axis=-2).shape[0]
     code_payload = code.encode('utf-8')
 
+    # Make the Pixel Data chunk, a multiline string for the Python interpreter
     pixel_data_seperators = b'\n"""', b'"""\n\n'
     header_size = 14
     info_header_size = 40
@@ -151,7 +152,7 @@ def Lab_to_RGB(lab) -> npt.NDArray[np.uint8]:
 
 
 
-def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
+def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.bool_]:
     """
     Checks if a Numpy array containing RGB colors are valid for a Python/BMP file.
 
