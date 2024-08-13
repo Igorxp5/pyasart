@@ -15,7 +15,7 @@ import numpy.typing as npt
 NOT_ALLOWED_UTF8_BYTES = [
     0x9,  # '\t' (horizontal tab)
     0xA,  # '\n' (new line)
-    0xC,  # '\n' (new page)
+    0xC,  # '\x0c' (new page)
     0xD   # '\r' (carriage return)
 ]
 NOT_ALLOWED_PIXEL_DATA_BYTES = NOT_ALLOWED_UTF8_BYTES + [
