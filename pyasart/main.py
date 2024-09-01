@@ -25,7 +25,7 @@ def main():
     args = parser.parse_args()
 
     # Read the Python source code from the input file
-    with open(args.input_file, 'r') as file:
+    with open(args.input_file, 'r', encoding='utf-8') as file:
         source_code = file.read()
 
     # Create the image from the source code
