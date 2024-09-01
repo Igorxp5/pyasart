@@ -33,7 +33,7 @@ def resize_for_python_bmp(size: int):
         # Can't have break line, carriage return in size value
         # Also non UTF8 characters are not allowed for a Python/BMP file
         if byte in NOT_ALLOWED_UTF8_BYTES:
-            byte += 1
+            byte = 0x0E
         elif byte >= 0x80:
             byte = 0
             current_size = (current_size & ~0xFF) + 0x100
