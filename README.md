@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
 #### Resulting Image
 
-![code_fibonacci](https://github.com/user-attachments/assets/b47621cd-847e-4cd2-9baf-1a9168c9f069)
+![code_fibonacci](https://github.com/user-attachments/assets/45812e9b-3c98-4b79-a1c1-9c6aa3e6c032)
 
 **Note: The above image is not in BMP format. GitHub does not allow to upload BMP files to Markdown files. Hence, downloading the image and trying to run it in Python interpreter won't work.**
 
