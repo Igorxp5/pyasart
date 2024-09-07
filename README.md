@@ -17,6 +17,7 @@ The main goal of this project is to address the challenge of embedding Python so
 - **Pillow (PIL)**
 - **Colour (colour-science)**
 - **Pygments**
+- **Tqdm**
 
 ## How to Use
 

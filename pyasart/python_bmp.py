@@ -8,6 +8,7 @@
 
 import struct
 
+import tqdm
 import colour
 import numpy as np
 import numpy.typing as npt
@@ -147,7 +148,7 @@ def RGB_to_Lab(rgb) -> npt.NDArray[np.float32]:
 
 def Lab_to_RGB(lab) -> npt.NDArray[np.uint8]:
     xyz = colour.Lab_to_XYZ(lab)
-    srgb = colour.XYZ_to_sRGB(xyz)
+    srgb = np.clip(colour.XYZ_to_sRGB(xyz), a_min=0, a_max=1)
     return np.round(srgb * 255).astype(np.uint8)
 
 
@@ -195,7 +196,7 @@ def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.b
 
 
 def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=5, tolerance=0.0001, derivate_h=1e-06,
-                                     random_attempts=300, episodes_by_attempt=500):
+                                     random_attempts=100, episodes_by_attempt=100):
     """
     Converts RGB colors in an image to the closest colors in the BMP UTF-8 color space.
 
@@ -236,14 +237,14 @@ def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=5, tolerance=0.000
 
     delta_E_closest_colors = colour.delta_E(non_bmp_utf8_lab_colors, closest_colors)
 
-    for attempt in range(random_attempts):
+    progress_bar = tqdm.trange(random_attempts, desc='Generating...')
+    for attempt in progress_bar:
 
         # Randomly select a starting color
         branch_current_color = rng.choice(all_bmp_utf8_lab_colors, non_bmp_utf8_colors.shape[:-1])
         diff_step_rate = np.full((3,), gradient_step, dtype=np.float32)
         diff_step_rate[[1, 2]] *= 2
 
-        episode = 0
         for episode in range(episodes_by_attempt):
             current_delta_e = colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color)
             
@@ -277,10 +278,8 @@ def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=5, tolerance=0.000
             new_diff = colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color)
             is_closer_than_before = new_diff < delta_E_closest_colors
             delta_E_closest_colors[is_closer_than_before & is_bmp_utf8_current_color] = new_diff[is_closer_than_before & is_bmp_utf8_current_color]
-            # if episode % 100 == 0:
-            #    print(np.mean(delta_E_closest_colors))
             closest_colors[is_closer_than_before & is_bmp_utf8_current_color] = branch_current_color[is_closer_than_before & is_bmp_utf8_current_color]
-        # print(episode)
+            progress_bar.set_description(f'Generating (E = {np.mean(delta_E_closest_colors):.2f})')
 
     # Convert the closest Lab colors back to RGB
     rgb_closest_colors = Lab_to_RGB(closest_colors)

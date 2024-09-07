@@ -29,7 +29,6 @@ def main():
         source_code = file.read()
 
     # Create the image from the source code
-    print('Generating the image, this can take some seconds...')
     generate_bmp_file_from_source_code(source_code, args.output_file)
 
 if __name__ == '__main__':
