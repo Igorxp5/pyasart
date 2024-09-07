@@ -194,8 +194,8 @@ def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.b
     return is_utf8_color.reshape(*rgb_colors.shape[:-1])
 
 
-def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=0.1, tolerance=1e-06, derivate_h=1e-06,
-                                     random_attempts=50, episodes_by_attempt=1000):
+def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=5, tolerance=0.0001, derivate_h=1e-06,
+                                     random_attempts=300, episodes_by_attempt=500):
     """
     Converts RGB colors in an image to the closest colors in the BMP UTF-8 color space.
 
@@ -224,7 +224,7 @@ def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=0.1, tolerance=1e-
     bmp_utf8_lab_colors = lab_image[is_bmp_utf8_color]
 
     # Initialize random number generator
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(0)
 
     all_bmp_utf8_lab_colors = get_all_valid_Lab_colors()
 
@@ -240,8 +240,10 @@ def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=0.1, tolerance=1e-
 
         # Randomly select a starting color
         branch_current_color = rng.choice(all_bmp_utf8_lab_colors, non_bmp_utf8_colors.shape[:-1])
-        diff_step_rate = gradient_step
+        diff_step_rate = np.full((3,), gradient_step, dtype=np.float32)
+        diff_step_rate[[1, 2]] *= 2
 
+        episode = 0
         for episode in range(episodes_by_attempt):
             current_delta_e = colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color)
             
@@ -253,29 +255,32 @@ def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=0.1, tolerance=1e-
 
             # Update colors based on the gradient
             diff_step = -diff_step_rate * gradient
-            diff_step_rate /= 2
+            diff_step_rate[0] *= 0.75
+            diff_step_rate[[1, 2]] *= 0.9
 
             # Check if the diff step is within the tolerance
             within_tolerance = np.all(np.abs(diff_step) <= tolerance, axis=-1)
-            
-            # Avoid changing colors that have reached the minimum tolerance
-            diff_step[within_tolerance] = np.zeros(3)
 
             if np.all(within_tolerance):
                 break
+
+            # Avoid changing colors that have reached the minimum tolerance
+            diff_step[within_tolerance] = np.zeros(3)
 
             # Apply the diff step
             branch_current_color += diff_step
             is_bmp_utf8_current_color = mask_valid_RGB_colors(Lab_to_RGB(branch_current_color))
 
-            if not np.any(is_bmp_utf8_current_color):
-                break
+            branch_current_color[~is_bmp_utf8_current_color] = closest_colors[~is_bmp_utf8_current_color]
 
             # Update closest_colors based on the results found in the episode
             new_diff = colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color)
             is_closer_than_before = new_diff < delta_E_closest_colors
             delta_E_closest_colors[is_closer_than_before & is_bmp_utf8_current_color] = new_diff[is_closer_than_before & is_bmp_utf8_current_color]
+            # if episode % 100 == 0:
+            #    print(np.mean(delta_E_closest_colors))
             closest_colors[is_closer_than_before & is_bmp_utf8_current_color] = branch_current_color[is_closer_than_before & is_bmp_utf8_current_color]
+        # print(episode)
 
     # Convert the closest Lab colors back to RGB
     rgb_closest_colors = Lab_to_RGB(closest_colors)
