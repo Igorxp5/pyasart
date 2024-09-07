@@ -13,6 +13,9 @@ import colour
 import numpy as np
 import numpy.typing as npt
 
+from .optimizer import init_adam_optimizer, step_adam_optimizer
+from .clusterizer import kmeans_centroids
+
 NOT_ALLOWED_UTF8_BYTES = [
     0x9,  # '\t' (horizontal tab)
     0xA,  # '\n' (new line)
@@ -20,7 +23,8 @@ NOT_ALLOWED_UTF8_BYTES = [
     0xD   # '\r' (carriage return)
 ]
 NOT_ALLOWED_PIXEL_DATA_BYTES = NOT_ALLOWED_UTF8_BYTES + [
-    0x22 # '"' (double-quote)
+    0x00, # '\x00' (null byte)
+    0x22  # '"' (double-quote)
 ]
 
 
@@ -140,6 +144,13 @@ def get_all_valid_Lab_colors() -> npt.NDArray[np.float32]:
     return RGB_to_Lab(get_all_valid_RGB_colors())
 
 
+def get_valid_Lab_centroids() -> npt.NDArray[np.float32]:
+    lab_colors = get_all_valid_Lab_colors()
+    lab_colors = kmeans_centroids(lab_colors, 4 * 6, 1000)
+    rgb_colors = Lab_to_RGB(lab_colors)
+    return lab_colors[mask_valid_RGB_colors(rgb_colors)].astype(np.float32)
+
+
 def RGB_to_Lab(rgb) -> npt.NDArray[np.float32]:
     srgb = rgb / 255.0
     xyz = colour.sRGB_to_XYZ(srgb)
@@ -150,7 +161,6 @@ def Lab_to_RGB(lab) -> npt.NDArray[np.uint8]:
     xyz = colour.Lab_to_XYZ(lab)
     srgb = np.clip(colour.XYZ_to_sRGB(xyz), a_min=0, a_max=1)
     return np.round(srgb * 255).astype(np.uint8)
-
 
 
 def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.bool_]:
@@ -171,32 +181,31 @@ def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.b
     
     is_utf8_color = (rgb_r < 128) & (rgb_g < 128) & (rgb_b < 128)
     is_utf8_color |= (
-        (rgb_b >= 0b11000000) & (rgb_b <= 0b11011111) &
-        (rgb_g >= 0b10000000) & (rgb_g <= 0b10111111) &
-        (rgb_r < 128) &
-        (((rgb_b & 0b11111) << 6) + (rgb_g & 0b111111)) > 0x80
+          (rgb_b >= 0b11000000) & (rgb_b <= 0b11011111)
+        & (rgb_g >= 0b10000000) & (rgb_g <= 0b10111111)
+        & (rgb_r < 128)
+        & ((((rgb_b & 0b11111) << 6) + (rgb_g & 0b111111)) >= 0x80)
     )
     is_utf8_color |= (
-        (rgb_b < 128) & \
-        (rgb_g >= 0b11000000) & (rgb_g <= 0b11011111) &
-        (rgb_r >= 0b10000000) & (rgb_r <= 0b10111111) &
-        (((rgb_g & 0b11111) << 6) + (rgb_r & 0b111111)) > 0x80
+          (rgb_b < 128)
+        & (rgb_g >= 0b11000000) & (rgb_g <= 0b11011111)
+        & (rgb_r >= 0b10000000) & (rgb_r <= 0b10111111)
+        & ((((rgb_g & 0b11111) << 6) + (rgb_r & 0b111111)) >= 0x80)
     )
     is_utf8_color |= (
-        (rgb_b >= 0b11100000) & (rgb_b <= 0b11101111) &
-        (rgb_g >= 0b10000000) & (rgb_g <= 0b10111111) &
-        (rgb_r >= 0b10000000) & (rgb_r <= 0b10111111) &
-        (((rgb_b & 0b1111) << 12) + ((rgb_g & 0b111111) << 6) + (rgb_r & 0b111111)) > 0x800
+        (rgb_b >= 0b11100000) & (rgb_b <= 0b11101111)
+        & (rgb_g >= 0b10000000) & (rgb_g <= 0b10111111)
+        & (rgb_r >= 0b10000000) & (rgb_r <= 0b10111111)
+        & ((((rgb_b & 0b1111) << 12) + ((rgb_g & 0b111111) << 6) + (rgb_r & 0b111111)) >= 0x800)
     )
 
     for byte_number in NOT_ALLOWED_PIXEL_DATA_BYTES:
-        is_utf8_color &= (rgb_r != byte_number) & (rgb_g != byte_number) & (rgb_b != byte_number)
+       is_utf8_color &= (rgb_r != byte_number) & (rgb_g != byte_number) & (rgb_b != byte_number)
 
     return is_utf8_color.reshape(*rgb_colors.shape[:-1])
 
 
-def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=5, tolerance=0.0001, derivate_h=1e-06,
-                                     random_attempts=100, episodes_by_attempt=100):
+def convert_RGB_image_for_python_bmp(rgb_image, learning_rate=0.01, epochs=1000, derivate_h=1e-06):
     """
     Converts RGB colors in an image to the closest colors in the BMP UTF-8 color space.
 
@@ -237,15 +246,14 @@ def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=5, tolerance=0.000
 
     delta_E_closest_colors = colour.delta_E(non_bmp_utf8_lab_colors, closest_colors)
 
-    progress_bar = tqdm.trange(random_attempts, desc='Generating...')
-    for attempt in progress_bar:
+    progress_bar = tqdm.tqdm(get_valid_Lab_centroids(), desc='Generating...')
+    for branch_current_color in progress_bar:
+        branch_current_color = np.tile(branch_current_color, (non_bmp_utf8_lab_colors.shape[0], 1))
+        adam_params = init_adam_optimizer(branch_current_color.shape)
 
-        # Randomly select a starting color
-        branch_current_color = rng.choice(all_bmp_utf8_lab_colors, non_bmp_utf8_colors.shape[:-1])
-        diff_step_rate = np.full((3,), gradient_step, dtype=np.float32)
-        diff_step_rate[[1, 2]] *= 2
+        diff_step = 0
 
-        for episode in range(episodes_by_attempt):
+        for epoch in range(epochs):
             current_delta_e = colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color)
             
             # Compute gradients
@@ -255,24 +263,13 @@ def convert_RGB_image_for_python_bmp(rgb_image, gradient_step=5, tolerance=0.000
             gradient = np.stack((grad_L, grad_a, grad_b), axis=-1)
 
             # Update colors based on the gradient
-            diff_step = -diff_step_rate * gradient
-            diff_step_rate[0] *= 0.75
-            diff_step_rate[[1, 2]] *= 0.9
-
-            # Check if the diff step is within the tolerance
-            within_tolerance = np.all(np.abs(diff_step) <= tolerance, axis=-1)
-
-            if np.all(within_tolerance):
-                break
-
-            # Avoid changing colors that have reached the minimum tolerance
-            diff_step[within_tolerance] = np.zeros(3)
+            diff_step, adam_params = step_adam_optimizer(*adam_params, gradient, diff_step, epoch, learning_rate)
 
             # Apply the diff step
-            branch_current_color += diff_step
-            is_bmp_utf8_current_color = mask_valid_RGB_colors(Lab_to_RGB(branch_current_color))
+            new_branch_current_color = branch_current_color + diff_step
+            is_bmp_utf8_current_color = mask_valid_RGB_colors(Lab_to_RGB(new_branch_current_color))
 
-            branch_current_color[~is_bmp_utf8_current_color] = closest_colors[~is_bmp_utf8_current_color]
+            branch_current_color[is_bmp_utf8_current_color] = new_branch_current_color[is_bmp_utf8_current_color]
 
             # Update closest_colors based on the results found in the episode
             new_diff = colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color)
