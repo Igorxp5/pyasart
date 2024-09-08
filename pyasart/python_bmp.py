@@ -8,6 +8,8 @@
 
 import struct
 
+from multiprocessing import Manager, freeze_support, cpu_count
+
 import tqdm
 import colour
 import numpy as np
@@ -26,6 +28,7 @@ NOT_ALLOWED_PIXEL_DATA_BYTES = NOT_ALLOWED_UTF8_BYTES + [
     0x00, # '\x00' (null byte)
     0x22  # '"' (double-quote)
 ]
+TOTAL_K_MEANS_CENTROIDS = 4 * 36
 
 
 def resize_for_python_bmp(size: int):
@@ -127,7 +130,6 @@ def generate_bmp_from_image_data_and_source_code(rgb_image: npt.NDArray[np.uint8
 
     return bmp_data
 
-
 def get_all_valid_RGB_colors() -> npt.NDArray[np.uint32]:
     color_index = np.arange(2**24, dtype=np.uint32)
 
@@ -146,7 +148,7 @@ def get_all_valid_Lab_colors() -> npt.NDArray[np.float32]:
 
 def get_valid_Lab_centroids() -> npt.NDArray[np.float32]:
     lab_colors = get_all_valid_Lab_colors()
-    lab_colors = kmeans_centroids(lab_colors, 4 * 6, 1000)
+    lab_colors = kmeans_centroids(lab_colors, TOTAL_K_MEANS_CENTROIDS, 1000)
     rgb_colors = Lab_to_RGB(lab_colors)
     return lab_colors[mask_valid_RGB_colors(rgb_colors)].astype(np.float32)
 
@@ -205,7 +207,7 @@ def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.b
     return is_utf8_color.reshape(*rgb_colors.shape[:-1])
 
 
-def convert_RGB_image_for_python_bmp(rgb_image, learning_rate=0.01, epochs=1000, derivate_h=1e-06):
+def convert_RGB_image_for_python_bmp(rgb_image: npt.NDArray[np.uint8], learning_rate=0.01, epochs=350, derivate_h=1e-06) -> npt.NDArray[np.uint8]:
     """
     Converts RGB colors in an image to the closest colors in the BMP UTF-8 color space.
 
@@ -216,6 +218,12 @@ def convert_RGB_image_for_python_bmp(rgb_image, learning_rate=0.01, epochs=1000,
     gradient information to minimize the color difference (CIEDE2000 Delta E) while ensuring the
     colors conform to the BMP UTF-8 color space.
     """
+    progress_bar = tqdm.tqdm(
+        total=TOTAL_K_MEANS_CENTROIDS,
+        bar_format='{l_bar}{bar}| {n:.0f}/{total_fmt} [{elapsed}<{remaining}, ' '{rate_fmt}{postfix}]',
+        desc='Generating...'
+    )
+
     # Check which colors in the RGB image are already BMP UTF-8 compliant
     is_bmp_utf8_color = mask_valid_RGB_colors(rgb_image)
 
@@ -223,60 +231,39 @@ def convert_RGB_image_for_python_bmp(rgb_image, learning_rate=0.01, epochs=1000,
     if np.all(is_bmp_utf8_color):
         return rgb_image
 
-    # Convert RGB image to Lab color space
-    lab_image = RGB_to_Lab(rgb_image)
-
     # Extract unique non-BMP UTF-8 colors from the image
     non_bmp_utf8_colors = np.unique(rgb_image[~is_bmp_utf8_color], axis=-2)
 
     # Convert non-BMP UTF-8 colors to Lab color space
     non_bmp_utf8_lab_colors = RGB_to_Lab(non_bmp_utf8_colors)
-    bmp_utf8_lab_colors = lab_image[is_bmp_utf8_color]
 
-    # Initialize random number generator
-    rng = np.random.default_rng(0)
-
-    all_bmp_utf8_lab_colors = get_all_valid_Lab_colors()
-
-    # Initialize closest colors and delta E distances
-    if bmp_utf8_lab_colors.size > 0:
-        closest_colors = rng.choice(bmp_utf8_lab_colors, non_bmp_utf8_lab_colors.shape[:-1])
-    else:
-        closest_colors = rng.choice(all_bmp_utf8_lab_colors, non_bmp_utf8_lab_colors.shape[:-1])
-
+    closest_colors = np.zeros(non_bmp_utf8_lab_colors.shape)
     delta_E_closest_colors = colour.delta_E(non_bmp_utf8_lab_colors, closest_colors)
 
-    progress_bar = tqdm.tqdm(get_valid_Lab_centroids(), desc='Generating...')
-    for branch_current_color in progress_bar:
-        branch_current_color = np.tile(branch_current_color, (non_bmp_utf8_lab_colors.shape[0], 1))
-        adam_params = init_adam_optimizer(branch_current_color.shape)
+    freeze_support()  # For Windows support
 
-        diff_step = 0
+    n_workers = cpu_count()
 
-        for epoch in range(epochs):
-            current_delta_e = colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color)
-            
-            # Compute gradients
-            grad_L = (colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color + np.array([derivate_h, 0, 0])) - current_delta_e) / derivate_h
-            grad_a = (colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color + np.array([0, derivate_h, 0])) - current_delta_e) / derivate_h
-            grad_b = (colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color + np.array([0, 0, derivate_h])) - current_delta_e) / derivate_h
-            gradient = np.stack((grad_L, grad_a, grad_b), axis=-1)
+    valid_lab_centroids = get_valid_Lab_centroids()
 
-            # Update colors based on the gradient
-            diff_step, adam_params = step_adam_optimizer(*adam_params, gradient, diff_step, epoch, learning_rate)
+    progress_bar.update()
 
-            # Apply the diff step
-            new_branch_current_color = branch_current_color + diff_step
-            is_bmp_utf8_current_color = mask_valid_RGB_colors(Lab_to_RGB(new_branch_current_color))
-
-            branch_current_color[is_bmp_utf8_current_color] = new_branch_current_color[is_bmp_utf8_current_color]
-
-            # Update closest_colors based on the results found in the episode
-            new_diff = colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color)
-            is_closer_than_before = new_diff < delta_E_closest_colors
-            delta_E_closest_colors[is_closer_than_before & is_bmp_utf8_current_color] = new_diff[is_closer_than_before & is_bmp_utf8_current_color]
-            closest_colors[is_closer_than_before & is_bmp_utf8_current_color] = branch_current_color[is_closer_than_before & is_bmp_utf8_current_color]
-            progress_bar.set_description(f'Generating (E = {np.mean(delta_E_closest_colors):.2f})')
+    update_unit = (TOTAL_K_MEANS_CENTROIDS - 1) / valid_lab_centroids.shape[0]
+    with Manager() as manager:
+        with manager.Pool(processes=n_workers) as pool:
+            task_params = [
+                (non_bmp_utf8_lab_colors, initial_color, epochs, learning_rate, derivate_h)
+                for initial_color in valid_lab_centroids
+            ]
+            task_iterator = pool.imap_unordered(_color_optimizer_worker, task_params)
+            for branch_current_color in task_iterator:
+                # Update closest_colors based on the results found in the episode
+                new_diff = colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color)
+                is_closer_than_before = new_diff < delta_E_closest_colors
+                delta_E_closest_colors[is_closer_than_before] = new_diff[is_closer_than_before]
+                closest_colors[is_closer_than_before] = branch_current_color[is_closer_than_before]
+                progress_bar.set_description(f'Generating (E = {np.mean(delta_E_closest_colors):.2f})')
+                progress_bar.update(update_unit)
 
     # Convert the closest Lab colors back to RGB
     rgb_closest_colors = Lab_to_RGB(closest_colors)
@@ -288,3 +275,36 @@ def convert_RGB_image_for_python_bmp(rgb_image, learning_rate=0.01, epochs=1000,
         result_rgb_image[mask] = rgb_closest_colors[i]
 
     return result_rgb_image
+
+
+
+def delta_E_gradient(color_a, color_b, derivate_h):
+    delta_e = colour.delta_E(color_a, color_b)
+    grad_L = (colour.delta_E(color_a, color_b + np.array([derivate_h, 0, 0])) - delta_e) / derivate_h
+    grad_a = (colour.delta_E(color_a, color_b + np.array([0, derivate_h, 0])) - delta_e) / derivate_h
+    grad_b = (colour.delta_E(color_a, color_b + np.array([0, 0, derivate_h])) - delta_e) / derivate_h
+    return np.stack((grad_L, grad_a, grad_b), axis=-1)
+
+
+def _color_optimizer_worker(args):
+    input_colors, initial_color, epochs, learning_rate, derivate_h = args
+
+    branch_current_color = np.tile(initial_color, (input_colors.shape[0], 1))
+    adam_params = init_adam_optimizer(branch_current_color.shape)
+
+    diff_step = 0
+
+    for epoch in range(epochs):
+        # Compute gradients
+        gradient = delta_E_gradient(input_colors, branch_current_color, derivate_h)
+
+        # Update colors based on the gradient
+        diff_step, adam_params = step_adam_optimizer(*adam_params, gradient, diff_step, epoch, learning_rate)
+
+        # Apply the diff step
+        new_branch_current_color = branch_current_color + diff_step
+        is_bmp_utf8_current_color = mask_valid_RGB_colors(Lab_to_RGB(new_branch_current_color))
+
+        branch_current_color[is_bmp_utf8_current_color] = new_branch_current_color[is_bmp_utf8_current_color]
+
+    return branch_current_color
