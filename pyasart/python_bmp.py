@@ -6,12 +6,14 @@
 # BMP file specification: https://www.ece.ualberta.ca/~elliott/ee552/studentAppNotes/2003_w/misc/bmp_file_format/bmp_file_format.htm
 # Python source code encoding: https://peps.python.org/pep-0263/
 
+import os
 import struct
 
 from multiprocessing import Manager, freeze_support, cpu_count
 
 import tqdm
 import colour
+import diskcache
 import numpy as np
 import numpy.typing as npt
 
@@ -29,6 +31,8 @@ NOT_ALLOWED_PIXEL_DATA_BYTES = NOT_ALLOWED_UTF8_BYTES + [
     0x22  # '"' (double-quote)
 ]
 TOTAL_K_MEANS_CENTROIDS = 4 * 36
+
+cache = diskcache.Cache(os.path.join(os.path.dirname(__file__), '.cache'))
 
 
 def resize_for_python_bmp(size: int):
@@ -130,6 +134,8 @@ def generate_bmp_from_image_data_and_source_code(rgb_image: npt.NDArray[np.uint8
 
     return bmp_data
 
+
+@cache.memoize()
 def get_all_valid_RGB_colors() -> npt.NDArray[np.uint32]:
     color_index = np.arange(2**24, dtype=np.uint32)
 
@@ -142,10 +148,12 @@ def get_all_valid_RGB_colors() -> npt.NDArray[np.uint32]:
     return rgb[mask_valid_RGB_colors(rgb)]
 
 
+@cache.memoize()
 def get_all_valid_Lab_colors() -> npt.NDArray[np.float32]:
     return RGB_to_Lab(get_all_valid_RGB_colors())
 
 
+@cache.memoize()
 def get_valid_Lab_centroids() -> npt.NDArray[np.float32]:
     lab_colors = get_all_valid_Lab_colors()
     lab_colors = kmeans_centroids(lab_colors, TOTAL_K_MEANS_CENTROIDS, 1000)
