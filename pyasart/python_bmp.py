@@ -29,7 +29,7 @@ NOT_ALLOWED_PIXEL_DATA_BYTES = NOT_ALLOWED_UTF8_BYTES + [
     0x00, # '\x00' (null byte)
     0x22  # '"' (double-quote)
 ]
-TOTAL_K_MEANS_CENTROIDS = 4 * 52
+TOTAL_K_MEANS_CENTROIDS = 200
 
 
 def resize_for_python_bmp(size: int):
@@ -149,7 +149,7 @@ def get_all_valid_Lab_colors() -> npt.NDArray[np.float32]:
 
 def get_valid_Lab_centroids() -> npt.NDArray[np.float32]:
     lab_colors = get_all_valid_Lab_colors()
-    lab_colors = kmeans_centroids(lab_colors, TOTAL_K_MEANS_CENTROIDS, 1000)
+    lab_colors = kmeans_centroids(lab_colors, TOTAL_K_MEANS_CENTROIDS, 1)
     rgb_colors = Lab_to_RGB(lab_colors)
     return lab_colors[mask_valid_RGB_colors(rgb_colors)].astype(np.float32)
 
