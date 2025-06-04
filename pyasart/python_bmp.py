@@ -14,8 +14,7 @@ import tqdm
 import numpy as np
 import numpy.typing as npt
 
-from .colors import sRGB_to_XYZ, XYZ_to_sRGB, XYZ_to_Lab, \
-    Lab_to_XYZ, delta_E_CIE2000
+from .colors import Lab_to_RGB, RGB_to_Lab, delta_E_CIE2000
 from .optimizer import init_adam_optimizer, step_adam_optimizer
 from .clusterizer import kmeans_centroids
 
@@ -152,18 +151,6 @@ def get_valid_Lab_centroids() -> npt.NDArray[np.float32]:
     lab_colors = kmeans_centroids(lab_colors, TOTAL_K_MEANS_CENTROIDS, 1)
     rgb_colors = Lab_to_RGB(lab_colors)
     return lab_colors[mask_valid_RGB_colors(rgb_colors)].astype(np.float32)
-
-
-def RGB_to_Lab(rgb) -> npt.NDArray[np.float32]:
-    srgb = rgb / 255.0
-    xyz = sRGB_to_XYZ(srgb)
-    return XYZ_to_Lab(xyz).astype(np.float32)
-
-
-def Lab_to_RGB(lab) -> npt.NDArray[np.uint8]:
-    xyz = Lab_to_XYZ(lab)
-    srgb = np.clip(XYZ_to_sRGB(xyz), a_min=0, a_max=1)
-    return np.round(srgb * 255).astype(np.uint8)
 
 
 def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.bool_]:

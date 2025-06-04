@@ -101,6 +101,18 @@ def Lab_to_XYZ(Lab: ArrayLike) -> NDArrayFloat:
     return np.column_stack(XYZ)
 
 
+def RGB_to_Lab(rgb) -> NDArray[np.float32]:
+    srgb = rgb / 255.0
+    xyz = sRGB_to_XYZ(srgb)
+    return XYZ_to_Lab(xyz).astype(np.float32)
+
+
+def Lab_to_RGB(lab) -> NDArray[np.uint8]:
+    xyz = Lab_to_XYZ(lab)
+    srgb = np.clip(XYZ_to_sRGB(xyz), a_min=0, a_max=1)
+    return np.round(srgb * 255).astype(np.uint8)
+
+
 def delta_E_CIE2000(
     Lab_1: ArrayLike, Lab_2: ArrayLike, textiles: bool = False
 ) -> NDArrayFloat:
