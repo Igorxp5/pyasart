@@ -29,7 +29,7 @@ NOT_ALLOWED_PIXEL_DATA_BYTES = NOT_ALLOWED_UTF8_BYTES + [
     0x00, # '\x00' (null byte)
     0x22  # '"' (double-quote)
 ]
-TOTAL_K_MEANS_CENTROIDS = 4 * 36
+TOTAL_K_MEANS_CENTROIDS = 4 * 52
 
 
 def resize_for_python_bmp(size: int):
@@ -208,7 +208,7 @@ def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.b
     return is_utf8_color.reshape(*rgb_colors.shape[:-1])
 
 
-def convert_RGB_image_for_python_bmp(rgb_image: npt.NDArray[np.uint8], learning_rate=0.01, epochs=350, derivate_h=1e-06) -> npt.NDArray[np.uint8]:
+def convert_RGB_image_for_python_bmp(rgb_image: npt.NDArray[np.uint8], learning_rate=0.025, epochs=75, derivate_h=1e-06) -> npt.NDArray[np.uint8]:
     """
     Converts RGB colors in an image to the closest colors in the BMP UTF-8 color space.
 
