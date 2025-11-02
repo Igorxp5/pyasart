@@ -1,15 +1,14 @@
 import numpy as np
 
-__all__ = ['kmeans']
+__all__ = ['kmeans_centroids']
 
 
-def init_centroids(k, samples, seed=0):
+def init_centroids(k, samples, seed=1):
     rng = np.random.default_rng(seed)
     return rng.choice(samples, k)
 
 
 def closest_centroid(x, centroids, k):
-    # print(centroids)
     distances = np.linalg.norm(centroids[np.newaxis, :] - x[:, np.newaxis], axis=-1)
     return np.argmin(distances, axis=-1)
 

@@ -12,11 +12,11 @@ import struct
 from multiprocessing import Manager, freeze_support, cpu_count
 
 import tqdm
-import colour
 import diskcache
 import numpy as np
 import numpy.typing as npt
 
+from .colors import Lab_to_RGB, RGB_to_Lab, delta_E_CIE2000
 from .optimizer import init_adam_optimizer, step_adam_optimizer
 from .clusterizer import kmeans_centroids
 
@@ -30,7 +30,7 @@ NOT_ALLOWED_PIXEL_DATA_BYTES = NOT_ALLOWED_UTF8_BYTES + [
     0x00, # '\x00' (null byte)
     0x22  # '"' (double-quote)
 ]
-TOTAL_K_MEANS_CENTROIDS = 4 * 36
+TOTAL_K_MEANS_CENTROIDS = 200
 
 cache = diskcache.Cache(os.path.join(os.path.dirname(__file__), '.cache'))
 
@@ -156,21 +156,9 @@ def get_all_valid_Lab_colors() -> npt.NDArray[np.float32]:
 @cache.memoize()
 def get_valid_Lab_centroids() -> npt.NDArray[np.float32]:
     lab_colors = get_all_valid_Lab_colors()
-    lab_colors = kmeans_centroids(lab_colors, TOTAL_K_MEANS_CENTROIDS, 1000)
+    lab_colors = kmeans_centroids(lab_colors, TOTAL_K_MEANS_CENTROIDS, 1)
     rgb_colors = Lab_to_RGB(lab_colors)
     return lab_colors[mask_valid_RGB_colors(rgb_colors)].astype(np.float32)
-
-
-def RGB_to_Lab(rgb) -> npt.NDArray[np.float32]:
-    srgb = rgb / 255.0
-    xyz = colour.sRGB_to_XYZ(srgb)
-    return colour.XYZ_to_Lab(xyz).astype(np.float32)
-
-
-def Lab_to_RGB(lab) -> npt.NDArray[np.uint8]:
-    xyz = colour.Lab_to_XYZ(lab)
-    srgb = np.clip(colour.XYZ_to_sRGB(xyz), a_min=0, a_max=1)
-    return np.round(srgb * 255).astype(np.uint8)
 
 
 def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.bool_]:
@@ -215,7 +203,7 @@ def mask_valid_RGB_colors(rgb_colors: npt.NDArray[np.uint8]) -> npt.NDArray[np.b
     return is_utf8_color.reshape(*rgb_colors.shape[:-1])
 
 
-def convert_RGB_image_for_python_bmp(rgb_image: npt.NDArray[np.uint8], learning_rate=0.01, epochs=350, derivate_h=1e-06) -> npt.NDArray[np.uint8]:
+def convert_RGB_image_for_python_bmp(rgb_image: npt.NDArray[np.uint8], learning_rate=0.025, epochs=75, derivate_h=1e-06) -> npt.NDArray[np.uint8]:
     """
     Converts RGB colors in an image to the closest colors in the BMP UTF-8 color space.
 
@@ -246,7 +234,7 @@ def convert_RGB_image_for_python_bmp(rgb_image: npt.NDArray[np.uint8], learning_
     non_bmp_utf8_lab_colors = RGB_to_Lab(non_bmp_utf8_colors)
 
     closest_colors = np.zeros(non_bmp_utf8_lab_colors.shape)
-    delta_E_closest_colors = colour.delta_E(non_bmp_utf8_lab_colors, closest_colors)
+    delta_E_closest_colors = delta_E_CIE2000(non_bmp_utf8_lab_colors, closest_colors)
 
     freeze_support()  # For Windows support
 
@@ -266,7 +254,7 @@ def convert_RGB_image_for_python_bmp(rgb_image: npt.NDArray[np.uint8], learning_
             task_iterator = pool.imap_unordered(_color_optimizer_worker, task_params)
             for branch_current_color in task_iterator:
                 # Update closest_colors based on the results found in the episode
-                new_diff = colour.delta_E(non_bmp_utf8_lab_colors, branch_current_color)
+                new_diff = delta_E_CIE2000(non_bmp_utf8_lab_colors, branch_current_color)
                 is_closer_than_before = new_diff < delta_E_closest_colors
                 delta_E_closest_colors[is_closer_than_before] = new_diff[is_closer_than_before]
                 closest_colors[is_closer_than_before] = branch_current_color[is_closer_than_before]
@@ -287,10 +275,10 @@ def convert_RGB_image_for_python_bmp(rgb_image: npt.NDArray[np.uint8], learning_
 
 
 def delta_E_gradient(color_a, color_b, derivate_h):
-    delta_e = colour.delta_E(color_a, color_b)
-    grad_L = (colour.delta_E(color_a, color_b + np.array([derivate_h, 0, 0])) - delta_e) / derivate_h
-    grad_a = (colour.delta_E(color_a, color_b + np.array([0, derivate_h, 0])) - delta_e) / derivate_h
-    grad_b = (colour.delta_E(color_a, color_b + np.array([0, 0, derivate_h])) - delta_e) / derivate_h
+    delta_e = delta_E_CIE2000(color_a, color_b)
+    grad_L = (delta_E_CIE2000(color_a, color_b + np.array([derivate_h, 0, 0])) - delta_e) / derivate_h
+    grad_a = (delta_E_CIE2000(color_a, color_b + np.array([0, derivate_h, 0])) - delta_e) / derivate_h
+    grad_b = (delta_E_CIE2000(color_a, color_b + np.array([0, 0, derivate_h])) - delta_e) / derivate_h
     return np.stack((grad_L, grad_a, grad_b), axis=-1)
 
 
